@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ネオン・アーケード・ブロック崩し V10 (SE音量調整 & BGMリスト動的ロード)</title>
+    <title>ネオン・アーケード・ブロック崩し V11 (BGMロード安定性向上)</title>
     <!-- Tailwind CSS for utility classes -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Tone.js for sound effects and BGM -->
@@ -136,7 +136,7 @@
 <body>
 
     <div class="game-wrapper">
-        <div id="game-title" class="text-neon">NEON BREAKOUT ARCADE V10 (LOUDER SE)</div>
+        <div id="game-title" class="text-neon">NEON BREAKOUT ARCADE V11 (BGM LOAD STABILITY)</div>
         <div id="score-board" class="text-neon">SCORE: 0 | LIVES: 3</div> 
         <canvas id="pongCanvas" width="600" height="400"></canvas>
         <div id="instructions" class="text-neon">
@@ -223,7 +223,8 @@
         // --------------------------------------------------
 
         // Base URL for the BGM repository
-        const BASE_URL = 'https://raw.githubusercontent.com/paruru-05/Pong/main/';
+        // **注意:** ここはご自身のGitHubリポジトリのRaw URLに修正してください。末尾に / を付ける必要があります。
+        const BASE_URL = 'https://raw.githubusercontent.com/paruru-05/Pong/main/'; 
         
         // BGMリストのファイルパス
         const BGM_LIST_PATH = 'bgm-file-list.json';
@@ -352,7 +353,7 @@
         }
         
         // --------------------------------------------------
-        // BGMリストの動的ロード
+        // BGMリストの動的ロード (キャッシュ無効化による安定性向上)
         // --------------------------------------------------
 
         /**
@@ -365,7 +366,8 @@
             loadingMessage.textContent = `BGMリスト '${BGM_LIST_PATH}' をロード中...`;
             
             try {
-                const response = await fetch(BASE_URL + BGM_LIST_PATH);
+                // キャッシュを無効化してリストを取得
+                const response = await fetch(BASE_URL + BGM_LIST_PATH, { cache: "no-store" });
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status} for ${BGM_LIST_PATH}`);
                 }
@@ -428,8 +430,8 @@
             let base64Data = null;
             
             try {
-                // Base64データを取得
-                const response = await fetch(fullPath);
+                // キャッシュを無効化してBase64データを取得
+                const response = await fetch(fullPath, { cache: "no-store" });
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -459,17 +461,24 @@
                     volume: -15 
                 }).toDestination();
                 
-                await player.loaded; // ロード完了を待つ
+                // ロード完了を待つ (タイムアウト機構は入れていないため、ネットワークエラー時はここで止まる)
+                await player.loaded; 
                 
+                // 古いプレイヤーがあればクリーンアップ (メモリ管理)
+                if (bgmMap[filePath] && bgmMap[filePath] !== player) {
+                    bgmMap[filePath].dispose();
+                }
+
                 bgmMap[filePath] = player;
                 bgmTrackLoadStatus = 'loaded';
                 bgmLoadingFilePath = null;
                 loadingMessage.classList.add('hidden');
 
             } catch (e) {
+                // Tone.jsのロードエラー (Base64データが不正な可能性が高い)
                 loadingMessage.classList.add('hidden');
                 console.error(`Tone.js BGM setup or loading failed for ${filePath}:`, e);
-                loadingMessage.textContent = `BGMロードエラー: '${filePath}'`;
+                loadingMessage.textContent = `BGMロードエラー: '${filePath}' のBase64データを確認してください。`;
                 bgmTrackLoadStatus = 'failed';
                 bgmLoadingFilePath = null;
             } finally {
@@ -480,7 +489,7 @@
         let paddleSynth, brickHitSynth, brickBreakSynth, wallSynth, scoreSynth;
         
         /**
-         * 効果音 (SE) を設定します。跳ね返り音の音量を大きくしました。
+         * 効果音 (SE) を設定します。
          */
         function setupSE() {
             // パドルヒット音 (音量: -5 dB に調整)
@@ -541,7 +550,7 @@
         }
         
         function playPaddleSoundAndVibrate() {
-            if (paddleSynth) paddleSynth.triggerAttackRelease("C4", "32n"); // C3からC4に変更して少し高く
+            if (paddleSynth) paddleSynth.triggerAttackRelease("C4", "32n"); 
             triggerVibration(VIBRATION_DURATION);
         }
         
@@ -578,6 +587,7 @@
                 controlPanel.classList.add('hidden');
             }
 
+            // BGMロード中、またはロード失敗時はボタンを無効化
             const isReady = bgmListLoadStatus === 'loaded' && bgmTrackLoadStatus !== 'loading' && bgmTrackLoadStatus !== 'failed';
             pauseButton.disabled = !isReady;
             bgmSelect.disabled = bgmTrackLoadStatus === 'loading' || bgmListLoadStatus !== 'loaded';
@@ -599,6 +609,9 @@
                 stopBGM();
 
                 if (!bgmMap[newFilePath]) {
+                    // ロード前にUIを更新してロード中であることを示す
+                    bgmTrackLoadStatus = 'loading'; 
+                    updateUIVisibility();
                     await loadBGMTrack(newFilePath);
                 }
                 
@@ -609,6 +622,7 @@
                 if (gameState === 'playing') {
                     startBGM();
                 }
+                // ロード完了後に再度UIを更新
                 updateUIVisibility();
             }
         });
@@ -627,19 +641,19 @@
         }
 
         function toggleGameState() {
-            if (Tone.context.state !== 'running') {
-                 Tone.start().catch(err => console.error("Failed to start audio context:", err));
-            }
-            
-            if (bgmListLoadStatus !== 'loaded' || bgmTrackLoadStatus === 'loading' || bgmTrackLoadStatus === 'failed') {
-                if (bgmListLoadStatus === 'failed' || bgmTrackLoadStatus === 'failed') {
-                    loadingMessage.classList.remove('hidden');
-                    loadingMessage.textContent = "BGMリストまたはトラックのロードに失敗しているため開始できません。";
-                }
+            // BGMロード状態の最終チェック
+            if (bgmListLoadStatus !== 'loaded' || bgmTrackLoadStatus !== 'loaded') {
+                loadingMessage.classList.remove('hidden');
+                loadingMessage.textContent = "BGMをロード中のため、しばらくお待ちください。";
+                setTimeout(() => loadingMessage.classList.add('hidden'), 3000);
                 updateUIVisibility();
                 return; 
             }
 
+            if (Tone.context.state !== 'running') {
+                 Tone.start().catch(err => console.error("Failed to start audio context:", err));
+            }
+            
             if (gameState === 'start' || gameState === 'gameover') {
                 restartGame();
                 gameState = 'paused';
@@ -930,7 +944,7 @@
             drawCircle(ball.x, ball.y, ball.radius);
 
             if (gameState === 'start' || gameState === 'paused') {
-                let mainText = "NEON BREAKOUT ARCADE V10";
+                let mainText = "NEON BREAKOUT ARCADE V11";
                 let subText = "";
                 
                 if (bgmListLoadStatus === 'loading') {
@@ -950,7 +964,14 @@
                 } else if (gameState === 'paused') {
                     subText = (ball.dx === 0 && ball.dy === 0 && lives > 0) ? "Click or Tap to Launch Ball" : "PAUSED (Click to Resume)";
                 }
-                drawTextOverlay(mainText, subText, 30, 20);
+                
+                // ロードが完了していない場合はメッセージをより目立たせる
+                if (bgmTrackLoadStatus !== 'loaded' && bgmTrackLoadStatus !== 'idle') {
+                    drawTextOverlay(mainText, subText, 30, 18);
+                } else {
+                    drawTextOverlay(mainText, subText, 30, 20);
+                }
+
             } else if (gameState === 'gameover') {
                 const isWin = (score >= BRICK_ROW_COUNT * BRICK_COLUMN_COUNT * 10);
                 const winnerText = isWin ? "LEVEL CLEAR!" : "GAME OVER";
