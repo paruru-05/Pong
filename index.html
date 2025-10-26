@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ネオン・アーケード・ブロック崩し V10 (SE音量調整 & BGMリスト動的ロード)</title>
+    <!-- Tailwind CSS for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js for sound effects and BGM -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        /*
+        * --------------------------------------------------
+        * Custom Neon Styling (カスタムネオンスタイル)
+        * --------------------------------------------------
+        */
+        :root {
+            --neon-color: #00FFFF; /* Default Bright Cyan */
+            --bg-color: #000000;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Inter', monospace;
+            padding: 0.5rem;
+            color: var(--neon-color);
+            flex-direction: column;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        .game-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 600px;
+            padding: 0.5rem;
+            border: 2px solid var(--neon-color);
+            box-shadow: 0 0 10px var(--neon-color), 0 0 20px var(--neon-color) inset;
+            border-radius: 8px;
+            background-color: #111;
+            margin-bottom: 0.75rem;
+        }
+
+        .text-neon {
+            color: var(--neon-color);
+            text-shadow: 0 0 5px var(--neon-color), 0 0 10px var(--neon-color);
+            font-weight: 700;
+            text-align: center;
+        }
+        
+        #game-title {
+            font-size: 1.5rem;
+            letter-spacing: 0.1em;
+        }
+
+        #score-board {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        #instructions {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-top: 0.5rem;
+        }
+
+        /* Canvas Styling */
+        #pongCanvas {
+            background-color: transparent;
+            border: 1px dashed rgba(0, 255, 255, 0.3);
+            touch-action: none;
+            width: 100%;
+            max-width: 600px;
+            height: auto;
+            aspect-ratio: 600 / 400;
+            cursor: pointer;
+        }
+
+        /* コントロールパネルのスタイル */
+        .control-panel {
+            width: 100%;
+            max-width: 600px;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        /* ネオンボタンのスタイル */
+        .neon-button {
+            background-color: transparent;
+            border: 2px solid var(--neon-color);
+            color: var(--neon-color);
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            box-shadow: 0 0 5px var(--neon-color);
+            transition: all 0.1s ease-in-out;
+            cursor: pointer;
+            margin: 0.25rem;
+        }
+        .neon-button:hover {
+            background-color: rgba(0, 255, 255, 0.2);
+            box-shadow: 0 0 10px var(--neon-color), 0 0 20px var(--neon-color);
+        }
+        .neon-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        
+        #loading-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2rem;
+            color: #FF00FF;
+            text-shadow: 0 0 5px #FF00FF;
+            z-index: 10;
+        }
+        
+        /* Select element styling */
+        .select-neon {
+            background-color: #000;
+            border-color: var(--neon-color) !important;
+            color: var(--neon-color) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-wrapper">
+        <div id="game-title" class="text-neon">NEON BREAKOUT ARCADE V10 (LOUDER SE)</div>
+        <div id="score-board" class="text-neon">SCORE: 0 | LIVES: 3</div> 
+        <canvas id="pongCanvas" width="600" height="400"></canvas>
+        <div id="instructions" class="text-neon">
+            Paddle moves with **mouse** or **touch**. Press **P** or **PAUSE** button. Break all blocks to win!
+        </div>
+        <div id="loading-message" class="hidden">BGM List Loading...</div>
+    </div>
+
+    <!-- コントロールパネル -->
+    <div id="control-panel-container" class="control-panel flex flex-col justify-center items-center space-y-3 p-2">
+        
+        <div class="flex flex-wrap justify-center items-center space-x-4 space-y-2">
+            <!-- BGM選択 (Dynamic List) -->
+            <div class="flex items-center space-x-2">
+                <label for="bgm-select" class="text-neon text-sm">BGM FILE:</label>
+                <!-- 選択肢はJavaScriptで動的に追加されます -->
+                <select id="bgm-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon"></select>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap justify-center items-center space-x-4 space-y-2">
+            <!-- 難易度選択 (ボール速度) -->
+            <div class="flex items-center space-x-2">
+                <label for="difficulty-select" class="text-neon text-sm">BALL SPEED:</label>
+                <select id="difficulty-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon">
+                    <option value="4" selected>EASY</option>
+                    <option value="6">MEDIUM</option>
+                    <option value="8">HARD</option>
+                </select>
+            </div>
+
+            <!-- パドルサイズ設定 -->
+            <div class="flex items-center space-x-2">
+                <label for="paddle-size-select" class="text-neon text-sm">PADDLE SIZE:</label>
+                <select id="paddle-size-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon">
+                    <option value="60">Small</option>
+                    <option value="90" selected>Medium</option>
+                    <option value="120">Large</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap justify-center items-center space-x-4 space-y-2">
+            <!-- 残機設定 -->
+            <div class="flex items-center space-x-2">
+                <label for="lives-select" class="text-neon text-sm">LIVES:</label>
+                <select id="lives-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon">
+                    <option value="1">1</option>
+                    <option value="3" selected>3</option>
+                    <option value="5">5</option>
+                </select>
+            </div>
+
+            <!-- ボールサイズ選択 -->
+            <div class="flex items-center space-x-2">
+                <label for="ball-size-select" class="text-neon text-sm">BALL SIZE:</label>
+                <select id="ball-size-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon">
+                    <option value="4">Small</option>
+                    <option value="5" selected>Medium</option>
+                    <option value="6">Large</option>
+                </select>
+            </div>
+
+            <!-- カラー選択 -->
+            <div class="flex items-center space-x-2">
+                <label for="color-select" class="text-neon text-sm">THEME:</label>
+                <select id="color-select" class="p-1 bg-black text-white border-2 border-current rounded focus:ring-0 select-neon">
+                    <option value="#00FFFF" style="color: #00FFFF;" selected>CYAN</option>
+                    <option value="#00FF00" style="color: #00FF00;">GREEN</option>
+                    <option value="#FF00FF" style="color: #FF00FF;">PINK</option>
+                    <option value="#FFA500" style="color: #FFA500;">ORANGE</option>
+                    <option value="#FFFFFF" style="color: #FFFFFF;">WHITE</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- モバイル向けポーズ/再開ボタン -->
+        <button id="pause-button" class="neon-button text-sm">START / RESTART</button>
+    </div>
+
+    <script type="module">
+        // --------------------------------------------------
+        // 定数と初期設定 (CONSTANTS AND INITIAL SETUP)
+        // --------------------------------------------------
+
+        // Base URL for the BGM repository
+        const BASE_URL = 'https://raw.githubusercontent.com/paruru-05/Pong/main/';
+        
+        // BGMリストのファイルパス
+        const BGM_LIST_PATH = 'bgm-file-list.json';
+        
+        let availableBGMTracks = []; 
+
+        const canvas = document.getElementById('pongCanvas');
+        const ctx = canvas.getContext('2d');
+        const controlPanel = document.getElementById('control-panel-container');
+        const difficultySelect = document.getElementById('difficulty-select');
+        const ballSizeSelect = document.getElementById('ball-size-select');
+        const paddleSizeSelect = document.getElementById('paddle-size-select');
+        const livesSelect = document.getElementById('lives-select');
+        const bgmSelect = document.getElementById('bgm-select');
+        const pauseButton = document.getElementById('pause-button');
+        const loadingMessage = document.getElementById('loading-message');
+
+        const CANVAS_WIDTH = 600;
+        const CANVAS_HEIGHT = 400;
+        const PADDLE_MAX_WIDTH = 120;
+        const PADDLE_HEIGHT = 10;
+        const VIBRATION_DURATION = 50;
+
+        const BRICK_ROW_COUNT = 5;
+        const BRICK_COLUMN_COUNT = 8;
+        const BRICK_WIDTH = (CANVAS_WIDTH - 20) / BRICK_COLUMN_COUNT - 5;
+        const BRICK_HEIGHT = 15;
+        const BRICK_PADDING = 5;
+        const BRICK_OFFSET_TOP = 30;
+        const BRICK_OFFSET_LEFT = 10;
+        
+        const BRICK_HIT_MAP = [3, 3, 2, 2, 1]; 
+        const BRICK_COLORS = {
+            3: '#FF00FF', 
+            2: '#FFA500', 
+            1: '#00FFFF' 
+        };
+        
+        const POWERUP_DROP_RATE = 0.15;
+        const POWERUP_SPEED = 2;
+        const POWERUP_TYPES = {
+            WIDE_PADDLE: { color: '#00FF00', duration: 10000, label: 'WIDE' } 
+        };
+        let powerUps = [];
+
+        let NEON_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--neon-color').trim() || '#00FFFF';
+        
+        let gameState = 'start';
+        let currentAnimationFrame;
+        
+        let bricks = [];
+        let score = 0;
+        let lives = parseInt(livesSelect.value, 10);
+        
+        let initialPaddleWidth = parseInt(paddleSizeSelect.value, 10);
+        let paddle = { x: CANVAS_WIDTH / 2 - initialPaddleWidth / 2, y: CANVAS_HEIGHT - PADDLE_HEIGHT, width: initialPaddleWidth, height: PADDLE_HEIGHT, defaultWidth: initialPaddleWidth };
+        let ball = { x: CANVAS_WIDTH / 2, y: CANVAS_HEIGHT - PADDLE_HEIGHT - 10, radius: parseInt(ballSizeSelect.value, 10), dx: 0, dy: 0, speed: parseInt(difficultySelect.value, 10) };
+        
+        let powerUpActive = false;
+        let powerUpEndTime = 0;
+        
+        // BGM管理用の状態
+        let bgmMap = {}; 
+        let currentBgmFilePath = null; 
+        let bgmListLoadStatus = 'loading'; 
+        let bgmTrackLoadStatus = 'idle'; 
+        let bgmLoadingFilePath = null; 
+
+        // --------------------------------------------------
+        // 初期化ロジック
+        // --------------------------------------------------
+        
+        function initBricks() {
+            bricks = [];
+            for (let c = 0; c < BRICK_COLUMN_COUNT; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < BRICK_ROW_COUNT; r++) {
+                    const brickX = c * (BRICK_WIDTH + BRICK_PADDING) + BRICK_OFFSET_LEFT;
+                    const brickY = r * (BRICK_HEIGHT + BRICK_PADDING) + BRICK_OFFSET_TOP;
+                    const initialHits = BRICK_HIT_MAP[r % BRICK_ROW_COUNT]; 
+                    bricks[c][r] = { 
+                        x: brickX, 
+                        y: brickY, 
+                        status: 1, 
+                        hits: initialHits,
+                        initialHits: initialHits,
+                        color: BRICK_COLORS[initialHits] 
+                    };
+                }
+            }
+        }
+        
+        function resetBall(isGameStart = false) {
+            paddle.x = CANVAS_WIDTH / 2 - paddle.width / 2;
+            ball.x = paddle.x + paddle.width / 2;
+            ball.y = paddle.y - ball.radius;
+            
+            if (isGameStart) {
+                ball.dx = 0;
+                ball.dy = 0;
+            } else {
+                ball.dx = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
+                ball.dy = -ball.speed;
+            }
+        }
+
+        function restartGame() {
+            score = 0;
+            lives = parseInt(livesSelect.value, 10);
+            powerUps = [];
+            
+            paddle.width = paddle.defaultWidth;
+            
+            initBricks();
+            resetBall(true);
+            updateScoreBoard();
+            
+            powerUpActive = false;
+            powerUpEndTime = 0;
+        }
+
+        function triggerVibration(duration) {
+            if ("vibrate" in navigator) {
+                navigator.vibrate(duration);
+            }
+        }
+        
+        // --------------------------------------------------
+        // BGMリストの動的ロード
+        // --------------------------------------------------
+
+        /**
+         * BGMファイルリスト (bgm-file-list.json) をリモートから取得し、選択肢を構築します。
+         */
+        async function loadBGMList() {
+            bgmListLoadStatus = 'loading';
+            bgmSelect.disabled = true;
+            loadingMessage.classList.remove('hidden');
+            loadingMessage.textContent = `BGMリスト '${BGM_LIST_PATH}' をロード中...`;
+            
+            try {
+                const response = await fetch(BASE_URL + BGM_LIST_PATH);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} for ${BGM_LIST_PATH}`);
+                }
+                
+                const list = await response.json();
+                if (!Array.isArray(list) || list.length === 0) {
+                    throw new Error("Invalid or empty BGM list format. Ensure it's an array of objects.");
+                }
+                
+                availableBGMTracks = list.filter(t => t.path && t.name);
+                
+                // Select要素をクリアし、新しい選択肢を追加
+                bgmSelect.innerHTML = '';
+                availableBGMTracks.forEach(track => {
+                    const option = document.createElement('option');
+                    option.value = track.path;
+                    option.textContent = track.name;
+                    bgmSelect.appendChild(option);
+                });
+                
+                bgmListLoadStatus = 'loaded';
+                
+                // 最初のトラックをデフォルトとして選択し、ロード開始
+                if (availableBGMTracks.length > 0) {
+                    currentBgmFilePath = availableBGMTracks[0].path;
+                    await loadBGMTrack(currentBgmFilePath);
+                } else {
+                    loadingMessage.textContent = "BGMリストが空です。";
+                    bgmTrackLoadStatus = 'failed';
+                }
+
+            } catch (e) {
+                console.error("Failed to load BGM list:", e);
+                bgmListLoadStatus = 'failed';
+                bgmSelect.innerHTML = '<option value="">Load Failed</option>';
+                loadingMessage.textContent = `BGMリストのロードに失敗: ${e.message}`;
+            } finally {
+                loadingMessage.classList.add('hidden');
+                bgmSelect.disabled = bgmListLoadStatus !== 'loaded';
+                updateUIVisibility();
+            }
+        }
+
+
+        /**
+         * 指定されたファイルパスのBase64 BGMデータをロードします。
+         */
+        async function loadBGMTrack(filePath) {
+            if (bgmMap[filePath]) {
+                return;
+            }
+            
+            bgmTrackLoadStatus = 'loading';
+            bgmLoadingFilePath = filePath;
+            loadingMessage.classList.remove('hidden');
+            loadingMessage.textContent = `BGMファイル '${filePath}' をロード中...`;
+            updateUIVisibility();
+
+            const fullPath = BASE_URL + filePath;
+            let base64Data = null;
+            
+            try {
+                // Base64データを取得
+                const response = await fetch(fullPath);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                base64Data = (await response.text()).trim(); 
+            } catch (e) {
+                console.error(`Failed to fetch Base64 BGM data for ${filePath}:`, e);
+                loadingMessage.textContent = `BGMファイル '${filePath}' の取得に失敗しました。`;
+                bgmTrackLoadStatus = 'failed';
+                bgmLoadingFilePath = null;
+                return;
+            }
+
+            if (!base64Data) {
+                loadingMessage.textContent = `BGMファイル '${filePath}' のデータが空です。`;
+                bgmTrackLoadStatus = 'failed';
+                bgmLoadingFilePath = null;
+                return;
+            }
+            
+            // Data URIの作成 (MP3としてエンコードされていると仮定)
+            const musicDataUri = 'data:audio/mp3;base64,' + base64Data;
+            
+            try {
+                const player = new Tone.Player({
+                    url: musicDataUri, 
+                    loop: true,
+                    volume: -15 
+                }).toDestination();
+                
+                await player.loaded; // ロード完了を待つ
+                
+                bgmMap[filePath] = player;
+                bgmTrackLoadStatus = 'loaded';
+                bgmLoadingFilePath = null;
+                loadingMessage.classList.add('hidden');
+
+            } catch (e) {
+                loadingMessage.classList.add('hidden');
+                console.error(`Tone.js BGM setup or loading failed for ${filePath}:`, e);
+                loadingMessage.textContent = `BGMロードエラー: '${filePath}'`;
+                bgmTrackLoadStatus = 'failed';
+                bgmLoadingFilePath = null;
+            } finally {
+                updateUIVisibility();
+            }
+        }
+        
+        let paddleSynth, brickHitSynth, brickBreakSynth, wallSynth, scoreSynth;
+        
+        /**
+         * 効果音 (SE) を設定します。跳ね返り音の音量を大きくしました。
+         */
+        function setupSE() {
+            // パドルヒット音 (音量: -5 dB に調整)
+            paddleSynth = new Tone.Synth({
+                oscillator: { type: "square" },
+                envelope: { attack: 0.001, decay: 0.1, sustain: 0.0, release: 0.1 },
+            }).toDestination();
+            paddleSynth.volume.value = -5; // 音量を大きく設定
+
+            // レンガヒット音 (音量: -10 dB)
+            brickHitSynth = new Tone.NoiseSynth({
+                noise: { type: "pink" },
+                envelope: { attack: 0.005, decay: 0.05, sustain: 0.0, release: 0.1 },
+            }).toDestination();
+            brickHitSynth.volume.value = -10;
+
+            // レンガ破壊音 (音量: -8 dB)
+            brickBreakSynth = new Tone.Synth({
+                oscillator: { type: "triangle" },
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0.0, release: 0.1 },
+            }).toDestination();
+            brickBreakSynth.volume.value = -8;
+            
+            // 壁ヒット音 (音量: -5 dB に調整)
+            wallSynth = new Tone.Synth({
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.001, decay: 0.1, sustain: 0.0, release: 0.1 },
+            }).toDestination();
+            wallSynth.volume.value = -5; // 音量を大きく設定
+
+            // ライフ減少/勝利音 (音量: -12 dB)
+            scoreSynth = new Tone.MembraneSynth({
+                pitchDecay: 0.008,
+                octaves: 2,
+                envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.8 },
+            }).toDestination();
+            scoreSynth.volume.value = -12;
+        }
+
+        function startBGM() {
+            const player = bgmMap[currentBgmFilePath];
+            if (player && bgmTrackLoadStatus === 'loaded' && player.state !== 'started') {
+                try {
+                    player.start(Tone.now()); 
+                } catch (e) {
+                    console.error("BGM start failed:", e);
+                }
+            }
+        }
+
+        function stopBGM() {
+             // すべてのプレイヤーを停止
+            Object.values(bgmMap).forEach(player => {
+                if (player.state === 'started') {
+                    player.stop(Tone.now());
+                }
+            });
+        }
+        
+        function playPaddleSoundAndVibrate() {
+            if (paddleSynth) paddleSynth.triggerAttackRelease("C4", "32n"); // C3からC4に変更して少し高く
+            triggerVibration(VIBRATION_DURATION);
+        }
+        
+        function playBrickHitSound(isBroken) {
+            if (isBroken && brickBreakSynth) {
+                brickBreakSynth.triggerAttackRelease("C5", "16n");
+            } else if (brickHitSynth) {
+                brickHitSynth.triggerAttackRelease("16n");
+            }
+        }
+
+        function playWallSound() {
+            if (wallSynth) wallSynth.triggerAttackRelease("G3", "32n");
+        }
+
+        function playLivesLostSound() {
+            if (scoreSynth) scoreSynth.triggerAttackRelease("G1", "8n");
+        }
+        
+        function playWinSound() {
+            if (scoreSynth) scoreSynth.triggerAttackRelease("E4", "4n");
+        }
+
+        // --------------------------------------------------
+        // UI制御と入力処理
+        // --------------------------------------------------
+
+        function updateUIVisibility() {
+            const isGameSetup = gameState === 'start' || gameState === 'gameover';
+
+            if (isGameSetup || gameState === 'paused') {
+                controlPanel.classList.remove('hidden');
+            } else {
+                controlPanel.classList.add('hidden');
+            }
+
+            const isReady = bgmListLoadStatus === 'loaded' && bgmTrackLoadStatus !== 'loading' && bgmTrackLoadStatus !== 'failed';
+            pauseButton.disabled = !isReady;
+            bgmSelect.disabled = bgmTrackLoadStatus === 'loading' || bgmListLoadStatus !== 'loaded';
+
+            if (gameState === 'playing') {
+                pauseButton.textContent = 'PAUSE';
+            } else if (gameState === 'paused') {
+                pauseButton.textContent = (ball.dx === 0 && ball.dy === 0) ? 'LAUNCH' : 'RESUME'; 
+            } else if (gameState === 'start' || gameState === 'gameover') {
+                 pauseButton.textContent = 'RESTART';
+            }
+        }
+
+        // BGM選択の変更イベント
+        bgmSelect.addEventListener('change', async (e) => {
+            const newFilePath = e.target.value;
+            
+            if (newFilePath) {
+                stopBGM();
+
+                if (!bgmMap[newFilePath]) {
+                    await loadBGMTrack(newFilePath);
+                }
+                
+                if (bgmMap[newFilePath]) {
+                    currentBgmFilePath = newFilePath;
+                }
+                
+                if (gameState === 'playing') {
+                    startBGM();
+                }
+                updateUIVisibility();
+            }
+        });
+
+        function handleInput(clientX) {
+            if (gameState === 'start' || gameState === 'gameover') return;
+
+            const rect = canvas.getBoundingClientRect();
+            let x = clientX - rect.left;
+
+            const scaleX = CANVAS_WIDTH / rect.width;
+            let gameX = x * scaleX;
+            
+            paddle.x = gameX - paddle.width / 2;
+            paddle.x = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, paddle.x));
+        }
+
+        function toggleGameState() {
+            if (Tone.context.state !== 'running') {
+                 Tone.start().catch(err => console.error("Failed to start audio context:", err));
+            }
+            
+            if (bgmListLoadStatus !== 'loaded' || bgmTrackLoadStatus === 'loading' || bgmTrackLoadStatus === 'failed') {
+                if (bgmListLoadStatus === 'failed' || bgmTrackLoadStatus === 'failed') {
+                    loadingMessage.classList.remove('hidden');
+                    loadingMessage.textContent = "BGMリストまたはトラックのロードに失敗しているため開始できません。";
+                }
+                updateUIVisibility();
+                return; 
+            }
+
+            if (gameState === 'start' || gameState === 'gameover') {
+                restartGame();
+                gameState = 'paused';
+                stopBGM(); 
+            } 
+            
+            if (gameState === 'playing') {
+                gameState = 'paused';
+                stopBGM(); 
+            } else if (gameState === 'paused') {
+                if (ball.dx === 0 && ball.dy === 0) {
+                    ball.dx = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
+                    ball.dy = -ball.speed;
+                }
+                gameState = 'playing';
+                startBGM(); 
+            }
+            
+            updateUIVisibility();
+        }
+        
+        canvas.addEventListener('click', toggleGameState);
+
+        canvas.addEventListener('mousemove', (e) => {
+            handleInput(e.clientX);
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length > 0) {
+                handleInput(e.touches[0].clientX);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'p' || e.key === 'P') {
+                toggleGameState();
+            }
+            if (e.key === ' ' && gameState === 'paused' && ball.dx === 0 && ball.dy === 0) {
+                e.preventDefault(); 
+                toggleGameState(); 
+            }
+        });
+
+        pauseButton.addEventListener('click', toggleGameState);
+
+        // --------------------------------------------------
+        // 描画・ゲームロジック
+        // --------------------------------------------------
+
+        function drawRect(x, y, w, h, color = NEON_COLOR) {
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.fillRect(x, y, w, h);
+            ctx.shadowBlur = 0;
+        }
+
+        function drawCircle(x, y, r, color = NEON_COLOR) {
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2, false);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawPowerUp(pu) {
+            const color = pu.type.color;
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 15;
+            
+            ctx.beginPath();
+            ctx.moveTo(pu.x, pu.y - pu.size);
+            ctx.lineTo(pu.x + pu.size, pu.y);
+            ctx.lineTo(pu.x, pu.y + pu.size);
+            ctx.lineTo(pu.x - pu.size, pu.y);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "#000000";
+            ctx.shadowBlur = 0;
+            ctx.font = 'bold 8px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(pu.type.label, pu.x, pu.y + 3);
+            
+            ctx.shadowBlur = 0;
+        }
+
+
+        function drawBricks() {
+            let activeBricks = 0;
+            for (let c = 0; c < BRICK_COLUMN_COUNT; c++) {
+                for (let r = 0; r < BRICK_ROW_COUNT; r++) {
+                    const b = bricks[c][r];
+                    if (b.status === 1) {
+                        const colorCode = b.color;
+                        drawRect(b.x, b.y, BRICK_WIDTH, BRICK_HEIGHT, colorCode);
+                        activeBricks++;
+                    }
+                }
+            }
+            return activeBricks;
+        }
+        
+        function drawTextOverlay(mainText, subText, mainSize = 40, subSize = 20) {
+            ctx.fillStyle = NEON_COLOR;
+            ctx.shadowColor = NEON_COLOR;
+            ctx.shadowBlur = 15;
+            ctx.textAlign = 'center';
+
+            ctx.font = `bold ${mainSize}px monospace`;
+            ctx.fillText(mainText, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+
+            ctx.font = `${subSize}px monospace`;
+            ctx.fillText(subText, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30);
+            
+            ctx.shadowBlur = 0;
+        }
+        
+        function updateScoreBoard() {
+            document.getElementById('score-board').textContent = `SCORE: ${score} | LIVES: ${lives}`;
+        }
+        
+        function checkPaddleCollision() {
+            if (
+                ball.x > paddle.x &&
+                ball.x < paddle.x + paddle.width &&
+                ball.y + ball.radius > paddle.y
+            ) {
+                playPaddleSoundAndVibrate();
+                
+                const relativeIntersectX = (paddle.x + (paddle.width / 2)) - ball.x;
+                const normalizedRelativeIntersectionX = (relativeIntersectX / (paddle.width / 2));
+                const bounceAngle = normalizedRelativeIntersectionX * (Math.PI / 3); 
+
+                ball.dx = -ball.speed * Math.sin(bounceAngle);
+                ball.dy = -ball.speed * Math.cos(bounceAngle);
+                
+                ball.y = paddle.y - ball.radius; 
+            }
+        }
+        
+        function applyPowerUp(type) {
+            if (type === POWERUP_TYPES.WIDE_PADDLE) {
+                const newWidth = Math.min(PADDLE_MAX_WIDTH, paddle.width * 1.5);
+                paddle.width = newWidth;
+                paddle.x = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, paddle.x)); 
+                powerUpActive = true;
+                powerUpEndTime = Date.now() + type.duration;
+            }
+        }
+        
+        function updatePowerUps() {
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                const pu = powerUps[i];
+                pu.y += POWERUP_SPEED;
+
+                if (
+                    pu.x > paddle.x &&
+                    pu.x < paddle.x + paddle.width &&
+                    pu.y + pu.size > paddle.y &&
+                    pu.y - pu.size < paddle.y + paddle.height
+                ) {
+                    applyPowerUp(pu.type);
+                    powerUps.splice(i, 1);
+                } 
+                else if (pu.y - pu.size > CANVAS_HEIGHT) {
+                    powerUps.splice(i, 1);
+                }
+            }
+            
+            if (powerUpActive && Date.now() > powerUpEndTime) {
+                paddle.width = paddle.defaultWidth;
+                paddle.x = Math.max(0, Math.min(CANVAS_WIDTH - paddle.width, paddle.x));
+                powerUpActive = false;
+            }
+        }
+
+        function checkBrickCollision() {
+            for (let c = 0; c < BRICK_COLUMN_COUNT; c++) {
+                for (let r = 0; r < BRICK_ROW_COUNT; r++) {
+                    const b = bricks[c][r];
+                    
+                    if (b.status === 1) {
+                        if (
+                            ball.x + ball.radius > b.x &&
+                            ball.x - ball.radius < b.x + BRICK_WIDTH &&
+                            ball.y + ball.radius > b.y &&
+                            ball.y - ball.radius < b.y + BRICK_HEIGHT
+                        ) {
+                            
+                            b.hits--;
+                            score += 10;
+                            updateScoreBoard();
+                            
+                            const isVerticalHit = ball.x > b.x && ball.x < b.x + BRICK_WIDTH;
+
+                            if (isVerticalHit) {
+                                ball.dy *= -1;
+                            } else {
+                                ball.dx *= -1;
+                            }
+                            
+                            if (b.hits <= 0) {
+                                b.status = 0;
+                                playBrickHitSound(true);
+                                
+                                if (Math.random() < POWERUP_DROP_RATE) {
+                                    powerUps.push({
+                                        x: b.x + BRICK_WIDTH / 2,
+                                        y: b.y + BRICK_HEIGHT / 2,
+                                        size: 8,
+                                        type: POWERUP_TYPES.WIDE_PADDLE 
+                                    });
+                                }
+                            } else {
+                                playBrickHitSound(false);
+                            }
+                            
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+
+        function update() {
+            if (gameState !== 'playing') return;
+            
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            updatePowerUps();
+
+            if (ball.x + ball.radius > CANVAS_WIDTH || ball.x - ball.radius < 0) {
+                ball.dx *= -1;
+                playWallSound();
+            }
+            if (ball.y - ball.radius < 0) {
+                ball.dy *= -1;
+                playWallSound();
+            }
+
+            checkPaddleCollision();
+            checkBrickCollision();
+            
+            // ゲームオーバー条件
+            if (ball.y + ball.radius > CANVAS_HEIGHT) {
+                lives--;
+                playLivesLostSound();
+                updateScoreBoard();
+                
+                if (lives <= 0) {
+                    gameState = 'gameover';
+                    stopBGM(); 
+                    updateUIVisibility();
+                } else {
+                    resetBall(true);
+                    gameState = 'paused'; 
+                    updateUIVisibility();
+                }
+            }
+            
+            // 勝利条件
+            const remainingBricks = drawBricks();
+            if (remainingBricks === 0) {
+                gameState = 'gameover';
+                playWinSound();
+                stopBGM(); 
+                updateUIVisibility();
+            }
+            
+            if (ball.dx === 0 && ball.dy === 0) {
+                 ball.x = paddle.x + paddle.width / 2;
+            }
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            drawBricks();
+            powerUps.forEach(pu => drawPowerUp(pu));
+            drawRect(paddle.x, paddle.y, paddle.width, paddle.height);
+            drawCircle(ball.x, ball.y, ball.radius);
+
+            if (gameState === 'start' || gameState === 'paused') {
+                let mainText = "NEON BREAKOUT ARCADE V10";
+                let subText = "";
+                
+                if (bgmListLoadStatus === 'loading') {
+                    mainText = "LOADING LIST...";
+                    subText = `Loading BGM list from '${BGM_LIST_PATH}'`;
+                } else if (bgmListLoadStatus === 'failed') {
+                    mainText = "LIST LOAD FAILED";
+                    subText = `Cannot start game. Check '${BGM_LIST_PATH}'.`;
+                } else if (bgmTrackLoadStatus === 'loading') {
+                    mainText = "LOADING BGM...";
+                    subText = `BGM file '${bgmLoadingFilePath}' is loading.`;
+                } else if (bgmTrackLoadStatus === 'failed') {
+                    mainText = "BGM LOAD FAILED";
+                    subText = "Select a working BGM file and try again.";
+                } else if (gameState === 'start') {
+                    subText = "Click or Tap to Start";
+                } else if (gameState === 'paused') {
+                    subText = (ball.dx === 0 && ball.dy === 0 && lives > 0) ? "Click or Tap to Launch Ball" : "PAUSED (Click to Resume)";
+                }
+                drawTextOverlay(mainText, subText, 30, 20);
+            } else if (gameState === 'gameover') {
+                const isWin = (score >= BRICK_ROW_COUNT * BRICK_COLUMN_COUNT * 10);
+                const winnerText = isWin ? "LEVEL CLEAR!" : "GAME OVER";
+                const subText = isWin ? "Congratulations!" : `Score: ${score}. Click to Restart.`;
+                drawTextOverlay(winnerText, subText, 40, 20);
+            }
+            
+            // パワーアップ残り時間の表示
+            if (powerUpActive && gameState === 'playing') {
+                const timeLeft = Math.ceil((powerUpEndTime - Date.now()) / 1000);
+                if (timeLeft > 0) {
+                    ctx.fillStyle = POWERUP_TYPES.WIDE_PADDLE.color;
+                    ctx.shadowColor = POWERUP_TYPES.WIDE_PADDLE.color;
+                    ctx.shadowBlur = 10;
+                    ctx.font = 'bold 16px monospace';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`WIDE: ${timeLeft}s`, CANVAS_WIDTH - 10, CANVAS_HEIGHT - 10);
+                    ctx.shadowBlur = 0;
+                }
+            }
+        }
+
+        function gameLoop(timestamp) {
+            update();
+            render();
+            currentAnimationFrame = requestAnimationFrame(gameLoop);
+        }
+        
+        // --------------------------------------------------
+        // オプション機能のロジック
+        // --------------------------------------------------
+
+        document.getElementById('color-select').addEventListener('change', (e) => {
+            NEON_COLOR = e.target.value;
+            document.documentElement.style.setProperty('--neon-color', NEON_COLOR);
+            
+            const selectElements = document.querySelectorAll('.select-neon');
+            selectElements.forEach(el => {
+                el.style.borderColor = NEON_COLOR;
+                el.style.color = NEON_COLOR;
+            });
+            pauseButton.style.borderColor = NEON_COLOR;
+            pauseButton.style.color = NEON_COLOR;
+            pauseButton.style.boxShadow = `0 0 5px ${NEON_COLOR}`;
+
+            const wrapper = document.querySelector('.game-wrapper');
+            wrapper.style.boxShadow = `0 0 10px ${NEON_COLOR}, 0 0 20px ${NEON_COLOR} inset`;
+        });
+
+        difficultySelect.addEventListener('change', (e) => {
+            ball.speed = parseInt(e.target.value, 10);
+            if (gameState === 'playing' || gameState === 'paused') {
+                const currentSpeed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+                if (currentSpeed > 0) {
+                    ball.dx = (ball.dx / currentSpeed) * ball.speed;
+                    ball.dy = (ball.dy / currentSpeed) * ball.speed;
+                }
+            }
+        });
+        
+        paddleSizeSelect.addEventListener('change', (e) => {
+            const newWidth = parseInt(e.target.value, 10);
+            paddle.defaultWidth = newWidth;
+            if (gameState === 'start' || gameState === 'gameover' || !powerUpActive) {
+                paddle.width = newWidth;
+                paddle.x = CANVAS_WIDTH / 2 - paddle.width / 2;
+            }
+        });
+
+        ballSizeSelect.addEventListener('change', (e) => {
+            ball.radius = parseInt(e.target.value, 10);
+        });
+
+        livesSelect.addEventListener('change', (e) => {
+            if (gameState === 'start' || gameState === 'gameover') {
+                lives = parseInt(e.target.value, 10);
+                updateScoreBoard();
+            }
+        });
+
+        // --------------------------------------------------
+        // 初期化 (INITIALIZATION)
+        // --------------------------------------------------
+
+        window.onload = async function () {
+            setupSE();
+            
+            await loadBGMList(); 
+            
+            paddle.defaultWidth = parseInt(paddleSizeSelect.value, 10);
+            paddle.width = paddle.defaultWidth;
+            paddle.x = CANVAS_WIDTH / 2 - paddle.width / 2;
+            ball.radius = parseInt(ballSizeSelect.value, 10);
+            ball.speed = parseInt(difficultySelect.value, 10);
+            
+            initBricks();
+            updateScoreBoard();
+            
+            const initialColor = document.getElementById('color-select').value;
+            NEON_COLOR = initialColor;
+            document.documentElement.style.setProperty('--neon-color', initialColor);
+            
+            document.getElementById('color-select').dispatchEvent(new Event('change'));
+            updateUIVisibility();
+
+            gameLoop();
+        };
+
+    </script>
+</body>
+</html>
